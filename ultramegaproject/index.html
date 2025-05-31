@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Анализ данных</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>Анализ рождаемости и курса валют</h1>
+
+    <label for="yearInput">Выберите год:</label>
+    <select id="yearInput"></select>
+    <label for="forecastDays">Прогноз (дней/лет):</label>
+    <input type="number" id="forecastDays" value="7" min="1" />
+    <button id="submitYearBtn">Анализ</button>
+
+    <h3 id="birthChangeSummary"></h3>
+<table id="currencyTable">
+  <thead>
+    <tr><th>Дата</th><th>USD</th><th>EUR</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+<h3 id="currencyChangeSummary"></h3>
+
+    <h2>Процент рождений вне брака</h2>
+    <table id="birthTable">
+      <thead>
+        <tr>
+          <th>Год</th>
+          <th>% вне брака</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="birthsPlot" class="plot"></div>
+
+    <h2>Курс валют по дням</h2>
+    <div id="currencyPlot" class="plot"></div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
