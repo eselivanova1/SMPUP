@@ -38,13 +38,17 @@ async function loadData() {
   }
 }
 
-function movingAverage(data, windowSize) {
+function movingAverage(series, windowSize, steps) {
   const result = [];
-  for (let i = data.length - windowSize; i < data.length; i++) {
-    const slice = data.slice(i, i + windowSize);
-    const avg = slice.reduce((sum, x) => sum + x, 0) / slice.length;
+  let values = [...series];
+
+  for (let i = 0; i < steps; i++) {
+    const recent = values.slice(-windowSize);
+    const avg = recent.reduce((sum, val) => sum + val, 0) / recent.length;
     result.push(avg);
+    values.push(avg);
   }
+
   return result;
 }
 
@@ -79,23 +83,18 @@ function analyzeBirths(childrenData, totalData, year, forecastYears) {
   document.getElementById("birthChangeSummary").textContent =
     `Максимальный рост: ${maxChange.toFixed(2)}% (${maxChangeYear}), падение: ${minChange.toFixed(2)}% (${minChangeYear})`;
 
-  const forecast = [];
-  for (let i = 1; i <= forecastYears; i++) {
-    const ma = movingAverage(percentages, 3).slice(-1)[0];
-    forecast.push(ma);
-    percentages.push(ma);
-    years.push(years[years.length - 1] + 1);
-  }
+  const forecast = movingAverage(percentages, 5, forecastYears);
+  const forecastYearsRange = Array.from({ length: forecastYears }, (_, i) => years[years.length - 1] + i + 1);
 
   const traceReal = {
-    x: years.slice(0, years.length - forecastYears),
-    y: percentages.slice(0, percentages.length - forecastYears),
+    x: years,
+    y: percentages,
     mode: 'lines+markers',
     name: 'Факт'
   };
 
   const traceForecast = {
-    x: years.slice(-forecastYears),
+    x: forecastYearsRange,
     y: forecast,
     mode: 'lines+markers',
     name: 'Прогноз',
@@ -140,30 +139,24 @@ function analyzeCurrency(data, year, forecastDays) {
     `USD: прирост ${maxUsd.toFixed(2)} (${maxUsdDate}), падение ${minUsd.toFixed(2)} (${minUsdDate}); ` +
     `EUR: прирост ${maxEur.toFixed(2)} (${maxEurDate}), падение ${minEur.toFixed(2)} (${minEurDate})`;
 
+  const forecastUsd = movingAverage(usd, 5, forecastDays);
+  const forecastEur = movingAverage(eur, 5, forecastDays);
   const lastDate = new Date(dates[dates.length - 1]);
-  const forecastDates = [];
-  const forecastUsd = [];
-  const forecastEur = [];
-
-  for (let i = 1; i <= forecastDays; i++) {
-    const date = new Date(lastDate);
-    date.setDate(date.getDate() + i);
-    forecastDates.push(date.toISOString().split('T')[0]);
-    forecastUsd.push(movingAverage(usd, 3).slice(-1)[0]);
-    forecastEur.push(movingAverage(eur, 3).slice(-1)[0]);
-    usd.push(forecastUsd[forecastUsd.length - 1]);
-    eur.push(forecastEur[forecastEur.length - 1]);
-  }
+  const forecastDates = Array.from({ length: forecastDays }, (_, i) => {
+    const d = new Date(lastDate);
+    d.setDate(d.getDate() + i + 1);
+    return d.toISOString().split('T')[0];
+  });
 
   const traceUsd = {
     x: dates,
-    y: usd.slice(0, dates.length),
+    y: usd,
     mode: 'lines',
     name: 'USD'
   };
   const traceEur = {
     x: dates,
-    y: eur.slice(0, dates.length),
+    y: eur,
     mode: 'lines',
     name: 'EUR'
   };
