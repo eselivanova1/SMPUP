@@ -1,145 +1,128 @@
+from flask import Flask, jsonify, request, send_file
 import pandas as pd
 import matplotlib.pyplot as plt
+import io
+import base64
 
-# Функция для вычисления скользящего среднего и экстраполяции
-def moving_average_extrapolation(series, window, steps):
-    values = list(series[-window:])  # Берём последние данные по окну
-    forecast = []  # Массив для хранения прогнозов
+app = Flask(__name__)
 
+# Функция скользящего среднего
+def moving_average_forecast(series, window, steps):
+    forecast = []
+    values = list(series[-window:])
     for _ in range(steps):
-        avg = sum(values[-window:]) / window  # Вычисляем среднее
+        avg = sum(values[-window:]) / window
         forecast.append(avg)
-        values.append(avg)  # Добавляем новый прогноз в список
-
+        values.append(avg)
     return forecast
 
-# Функция анализа рождаемости
-def analyze_births(children_data_file, total_births_data_file, forecast_years):
-    # Загружаем данные из JSON файлов
-    children_data = pd.read_json(children_data_file)
-    total_births_data = pd.read_json(total_births_data_file)
+# Роут для анализа рождаемости
+@app.route('/api/births', methods=['GET'])
+def get_birth_data():
+    try:
+        children = pd.read_json('childrenData.json')
+        births = pd.read_json('totalBirthsData.json')
+        df = pd.merge(children, births, on='year')
+        df['percentage'] = df['children_born_out_of_wedlock'] / df['total_births'] * 100
 
-    # Объединяем данные по году
-    df = pd.merge(children_data, total_births_data, on="year")
-    df["percentage_out_of_wedlock"] = (df["children_born_out_of_wedlock"] / df["total_births"]) * 100
+        # вычисляем изменение по годам
+        df['change'] = df['percentage'].diff()
+        max_change = df['change'].max()
+        min_change = df['change'].min()
+        max_year = int(df.loc[df['change'].idxmax(), 'year'])
+        min_year = int(df.loc[df['change'].idxmin(), 'year'])
 
-    # Выводим процент рождаемости вне брака
-    print("\nПроцент рождений вне брака по годам:")
-    print(df[["year", "percentage_out_of_wedlock"]].to_string(index=False))
+        # прогноз
+        forecast_n = int(request.args.get('forecast', 3))
+        forecast = moving_average_forecast(df['percentage'], window=3, steps=forecast_n)
+        forecast_years = list(range(df['year'].max()+1, df['year'].max()+1+forecast_n))
 
-    # График фактических данных
-    plt.figure(figsize=(10, 5))
-    plt.plot(df["year"], df["percentage_out_of_wedlock"], marker="o", label="Факт")
-    plt.title("Процент детей, рождённых вне брака")
-    plt.xlabel("Год")
-    plt.ylabel("Процент")
-    plt.grid(True)
-    plt.legend()
-    plt.show()
+        # график
+        plt.figure(figsize=(10,5))
+        plt.plot(df['year'], df['percentage'], label='Факт', marker='o')
+        plt.plot(forecast_years, forecast, label='Прогноз', linestyle='--', marker='x')
+        plt.xlabel('Год')
+        plt.ylabel('% вне брака')
+        plt.title('Дети вне брака по годам')
+        plt.grid(True)
+        plt.legend()
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        encoded = base64.b64encode(buf.read()).decode()
+        plt.close()
 
-    # Изменения по годам
-    df["change"] = df["percentage_out_of_wedlock"].diff()  # Разница между текущим и предыдущим годом
-    max_change = df["change"].max()
-    min_change = df["change"].min()
-    max_year = df.loc[df["change"].idxmax(), "year"]
-    min_year = df.loc[df["change"].idxmin(), "year"]
+        return jsonify({
+            'table': df[['year', 'percentage']].to_dict(orient='records'),
+            'max_change': max_change,
+            'max_year': max_year,
+            'min_change': min_change,
+            'min_year': min_year,
+            'forecast': list(zip(forecast_years, forecast)),
+            'plot': encoded
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-    # Выводим информацию об изменениях
-    print(f"\n📈 Максимальный рост: {max_change:.2f}% в {max_year} году")
-    print(f"📉 Максимальное падение: {min_change:.2f}% в {min_year} году")
+# Роут для анализа курса валют
+@app.route('/api/currency', methods=['GET'])
+def get_currency_data():
+    try:
+        df = pd.read_json('exchangeRates.json')
+        df['date'] = pd.to_datetime(df['date'])
+        df.sort_values('date', inplace=True)
 
-    # Прогнозирование (скользящее среднее)
-    forecast = moving_average_extrapolation(df["percentage_out_of_wedlock"], window=3, steps=forecast_years)
-    forecast_years_range = list(range(df["year"].max() + 1, df["year"].max() + 1 + forecast_years))
+        df['usd_change'] = df['usd'].diff()
+        df['eur_change'] = df['eur'].diff()
 
-    # График с прогнозом
-    plt.figure(figsize=(10, 5))
-    plt.plot(df["year"], df["percentage_out_of_wedlock"], marker="o", label="Факт")
-    plt.plot(forecast_years_range, forecast, marker="x", linestyle="--", label="Прогноз")
-    plt.title("Прогноз процента рождённых вне брака (скользящая средняя)")
-    plt.xlabel("Год")
-    plt.ylabel("Процент")
-    plt.grid(True)
-    plt.legend()
-    plt.show()
+        max_usd_gain = df['usd_change'].min()
+        max_usd_loss = df['usd_change'].max()
+        max_usd_gain_date = df.loc[df['usd_change'].idxmin(), 'date'].strftime('%Y-%m-%d')
+        max_usd_loss_date = df.loc[df['usd_change'].idxmax(), 'date'].strftime('%Y-%m-%d')
 
-# Функция анализа курса валют
-def analyze_currency(currency_file, forecast_days):
-    df = pd.read_json(currency_file)
-    df["date"] = pd.to_datetime(df["date"])  # Преобразуем даты в формат datetime
+        max_eur_gain = df['eur_change'].min()
+        max_eur_loss = df['eur_change'].max()
+        max_eur_gain_date = df.loc[df['eur_change'].idxmin(), 'date'].strftime('%Y-%m-%d')
+        max_eur_loss_date = df.loc[df['eur_change'].idxmax(), 'date'].strftime('%Y-%m-%d')
 
-    # Выводим курс рубля по дням
-    print("\nКурс рубля по дням:")
-    print(df[["date", "usd", "eur"]].to_string(index=False))
+        forecast_n = int(request.args.get('forecast', 5))
+        forecast_usd = moving_average_forecast(df['usd'], window=3, steps=forecast_n)
+        forecast_eur = moving_average_forecast(df['eur'], window=3, steps=forecast_n)
+        last_date = df['date'].max()
+        forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=forecast_n)
 
-    # График курса валют
-    plt.figure(figsize=(12, 6))
-    plt.plot(df["date"], df["usd"], label="USD")
-    plt.plot(df["date"], df["eur"], label="EUR")
-    plt.title("Курс рубля к USD и EUR")
-    plt.xlabel("Дата")
-    plt.ylabel("Курс")
-    plt.legend()
-    plt.grid(True)
-    plt.show()
-
-    # Изменения по дням
-    df["usd_change"] = df["usd"].diff()
-    df["eur_change"] = df["eur"].diff()
-
-    max_usd_gain = df["usd_change"].min()  # Максимальное укрепление рубля
-    max_usd_gain_date = df.loc[df["usd_change"].idxmin(), "date"]
-    max_usd_loss = df["usd_change"].max()  # Максимальное ослабление рубля
-    max_usd_loss_date = df.loc[df["usd_change"].idxmax(), "date"]
-
-    max_eur_gain = df["eur_change"].min()  # Максимальное укрепление рубля по EUR
-    max_eur_gain_date = df.loc[df["eur_change"].idxmin(), "date"]
-    max_eur_loss = df["eur_change"].max()  # Максимальное ослабление рубля по EUR
-    max_eur_loss_date = df.loc[df["eur_change"].idxmax(), "date"]
-    # Выводим информацию о изменениях
-    print(f"\n💵 USD:")
-    print(f"  📈 Рубль укрепился на {abs(max_usd_gain):.2f} в {max_usd_gain_date.date()}")
-    print(f"  📉 Рубль ослаб на {abs(max_usd_loss):.2f} в {max_usd_loss_date.date()}")
-    
-    print(f"\n💶 EUR:")
-    print(f"  📈 Рубль укрепился на {abs(max_eur_gain):.2f} в {max_eur_gain_date.date()}")
-    print(f"  📉 Рубль ослаб на {abs(max_eur_loss):.2f} в {max_eur_loss_date.date()}")
-
-    # Прогнозирование курса валют (скользящее среднее)
-    for currency in ["usd", "eur"]:
-        forecast = moving_average_extrapolation(df[currency], window=3, steps=forecast_days)
-        forecast_dates = pd.date_range(start=df["date"].max() + pd.Timedelta(days=1), periods=forecast_days)
-
-        plt.figure(figsize=(10, 4))
-        plt.plot(df["date"], df[currency], label="Факт", marker="o")
-        plt.plot(forecast_dates, forecast, label="Прогноз", linestyle="--", marker="x")
-        plt.title(f"Прогноз курса рубля к {currency.upper()} (скользящая средняя)")
-        plt.xlabel("Дата")
-        plt.ylabel("Курс")
+        # график
+        plt.figure(figsize=(10,6))
+        plt.plot(df['date'], df['usd'], label='USD факт')
+        plt.plot(df['date'], df['eur'], label='EUR факт')
+        plt.plot(forecast_dates, forecast_usd, label='USD прогноз', linestyle='--')
+        plt.plot(forecast_dates, forecast_eur, label='EUR прогноз', linestyle='--')
+        plt.title('Курс рубля')
+        plt.xlabel('Дата')
+        plt.ylabel('Курс')
         plt.legend()
         plt.grid(True)
-        plt.show()
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        encoded = base64.b64encode(buf.read()).decode()
+        plt.close()
 
-# === Запуск ===
-import os
-
-if __name__ == "__main__":
-    try:
-        forecast_n = int(input("Введите количество лет для прогноза по рождаемости: "))
-        
-        births_path1 = "d:/4 семестр/1/childrenData.json"
-        births_path2 = "d:/4 семестр/1/totalBirthsData.json"
-        currency_path = "d:/4 семестр/1/exchangeRates.json"
-
-        
-        analyze_births(births_path1, births_path2, forecast_n)
-
-        forecast_n_days = int(input("\nВведите количество дней для прогноза по курсу валют: "))
-        analyze_currency(currency_path, forecast_n_days)
-
-    except FileNotFoundError as e:
-        print(f"❌ Ошибка: файл не найден — {e}")
-    except ValueError:
-        print("❌ Ошибка: введено не число.")
+        return jsonify({
+            'table': df[['date','usd','eur']].astype(str).to_dict(orient='records'),
+            'max_usd_gain': max_usd_gain,
+            'max_usd_gain_date': max_usd_gain_date,
+            'max_usd_loss': max_usd_loss,
+            'max_usd_loss_date': max_usd_loss_date,
+            'max_eur_gain': max_eur_gain,
+            'max_eur_gain_date': max_eur_gain_date,
+            'max_eur_loss': max_eur_loss,
+            'max_eur_loss_date': max_eur_loss_date,
+            'forecast': list(zip(forecast_dates.strftime('%Y-%m-%d'), forecast_usd, forecast_eur)),
+            'plot': encoded
+        })
     except Exception as e:
-        print(f"❌ Произошла ошибка: {e}")
+        return jsonify({'error': str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True)
